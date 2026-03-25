@@ -324,11 +324,27 @@ const PLANETS=[
   // 4: Mars
   {nameKo:'화성',nameEn:'Mars',bodyR:38,sp:5.5,rings:null,
    colorFn:(nd,d)=>`hsla(${14+nd*8},${62+d*10}%,${Math.round(16+d*44)}%,${(0.6+(1-nd)*0.4).toFixed(2)})`},
-  // 5: Jupiter
+  // 5: Jupiter  (with Great Red Spot)
   {nameKo:'목성',nameEn:'Jupiter',bodyR:92,sp:8.5,rings:null,
-   colorFn:(nd,d,x,y)=>{
+   colorFn:(nd,d,x,y,z)=>{
      const band=(Math.sin(y*0.18)+1)*0.5,hue=28+band*18,sat=42+band*22;
-     return`hsla(${hue},${sat}%,${Math.round(20+d*45)}%,${(0.55+(1-nd)*0.45).toFixed(2)})`;
+     const L=Math.round(20+d*45);
+     const a=(0.55+(1-nd)*0.45).toFixed(2);
+     // Great Red Spot — southern mid-latitude oval, fixed longitude rotates with planet
+     if(nd>0.52){
+       const r=Math.sqrt(x*x+y*y+z*z)||1;
+       const nx=x/r,ny=y/r,nz=z/r;
+       // GRS center: southern hemisphere (ny≈-0.22), at ~45° longitude (nx≈0.68,nz≈0.68)
+       const grsNy=ny+0.22;                          // lat deviation
+       const ang=Math.atan2(nz,nx)-0.785;            // lon deviation (π/4)
+       const gt=((ang+Math.PI)%(2*Math.PI))-Math.PI; // normalize
+       const gd=Math.sqrt((grsNy*5.5)*(grsNy*5.5)+(gt*1.4)*(gt*1.4));
+       if(gd<0.55){
+         const gi=Math.max(0,1-gd/0.55);
+         return`hsla(${8+gi*4},${52+gi*28}%,${Math.round(L+gi*10)}%,${a})`;
+       }
+     }
+     return`hsla(${hue},${sat}%,${L}%,${a})`;
    }},
   // 6: Saturn
   {nameKo:'토성',nameEn:'Saturn',bodyR:65,sp:6.5,
@@ -345,6 +361,7 @@ const PLANETS=[
 ];
 
 const EARTH_IDX=3;
+const JUPITER_IDX=5;
 const SATURN_IDX=6;
 let currentIdx=6; // start at Saturn
 
@@ -433,20 +450,41 @@ function updateSaturnMoons(){
   }
 }
 
-// Moon label: draw name tags after dots
-function drawMoonLabels(xOff){
-  ctx.save();
-  ctx.font=`${Math.round(9*scale+7)}px 'Helvetica Neue',Arial,sans-serif`;
-  ctx.textAlign='center';
-  for(const m of saturnMoons){
-    // use first moonDot as position reference
-    const ref=m.moonDots[0]?.dot;
-    if(!ref)continue;
-    const lx=ref.sx+ref.dx+ref.bx, ly=ref.sy+ref.dy+ref.by-Math.round(14*scale+8);
-    ctx.fillStyle='rgba(210,225,255,0.45)';
-    ctx.fillText(m.name,lx,ly);
+// ─── Jupiter Galilean Moons ─────────────────────────────
+const JUPITER_MOON_CFGS=[
+  // Io: volcanic yellow-orange-red
+  {r:9, sp:3.0, orbitR:185, spd:0.017, ph:0.0, inc:0.02,
+   color:(nd,d)=>`hsla(${38+nd*20},${62+d*15}%,${Math.round(32+d*42)}%,${(0.72+(1-nd)*0.28).toFixed(2)})`},
+  // Europa: icy white with faint blue-gray
+  {r:7, sp:2.5, orbitR:220, spd:0.011, ph:1.6, inc:0.01,
+   color:(nd,d)=>`hsla(${198+nd*8},${18+d*14}%,${Math.round(54+(1-nd)*26)}%,${(0.72+(1-nd)*0.28).toFixed(2)})`},
+  // Ganymede: large, gray-brown
+  {r:12, sp:3.5, orbitR:268, spd:0.007, ph:3.1, inc:0.03,
+   color:(nd,d)=>`hsla(${28+nd*12},${10+d*8}%,${Math.round(28+(1-nd)*26)}%,${(0.72+(1-nd)*0.28).toFixed(2)})`},
+  // Callisto: dark cratered
+  {r:10, sp:3.2, orbitR:328, spd:0.004, ph:4.7, inc:0.04,
+   color:(nd,d)=>`hsla(${22+nd*8},${7+d*5}%,${Math.round(18+(1-nd)*18)}%,${(0.72+(1-nd)*0.28).toFixed(2)})`},
+];
+
+const jupiterMoons=JUPITER_MOON_CFGS.map(cfg=>{
+  const moonDots=[];
+  const{r,sp,color}=cfg;
+  for(let z=-r;z<=r;z+=sp)for(let y=-r;y<=r;y+=sp)for(let x=-r;x<=r;x+=sp){
+    const r2=x*x+y*y+z*z;if(r2>=r*r)continue;
+    const nd=Math.sqrt(r2)/r,rr=Math.sqrt(r2)||1;
+    const diff=Math.max(0,(x/rr)*lx0+(y/rr)*ly0+(z/rr)*lz0);
+    moonDots.push({lx:x,ly:y,lz:z,dot:new Dot3D(0,0,0,color(nd,diff),0.55+Math.random()*0.7)});
   }
-  ctx.restore();
+  return{...cfg,moonDots,angle:cfg.ph};
+});
+
+function updateJupiterMoons(){
+  for(const m of jupiterMoons){
+    m.angle+=m.spd;
+    const a=m.angle;
+    const ox=Math.cos(a)*m.orbitR,oz=Math.sin(a)*m.orbitR,oy=Math.sin(a)*m.orbitR*Math.tan(m.inc);
+    for(const md of m.moonDots){md.dot.ox=md.lx+ox;md.dot.oy=md.ly+oy;md.dot.oz=md.lz+oz;}
+  }
 }
 
 // ─── Navigation / Transition ────────────────────────────
@@ -486,16 +524,17 @@ document.getElementById('btn-next').addEventListener('click',()=>navigate(1));
 const DSORT=(a,b)=>a.depth-b.depth;
 let angleY=0;
 
-function drawPlanetSet(dots,xOff,isEarth,isSaturn){
+function drawPlanetSet(dots,xOff,isEarth,isSaturn,isJupiter){
   for(const d of dots)d.project(angleY,xOff);
   if(isEarth)for(const s of satellites)s.dot.project(angleY,xOff);
   if(isSaturn)for(const m of saturnMoons)for(const md of m.moonDots)md.dot.project(angleY,xOff);
+  if(isJupiter)for(const m of jupiterMoons)for(const md of m.moonDots)md.dot.project(angleY,xOff);
   let all=[...dots];
   if(isEarth)all=[...all,...satellites.map(s=>s.dot)];
   if(isSaturn)all=[...all,...saturnMoons.flatMap(m=>m.moonDots.map(md=>md.dot))];
+  if(isJupiter)all=[...all,...jupiterMoons.flatMap(m=>m.moonDots.map(md=>md.dot))];
   all.sort(DSORT);
   for(const d of all){d.update();d.draw();}
-  if(isSaturn)drawMoonLabels(xOff);
 }
 
 function drawGlow(idx,alpha=1){
@@ -580,17 +619,21 @@ function frame(){
     updateSatellites();
   if(currentIdx===SATURN_IDX||(trans.active&&(trans.fromDots===planetCache[SATURN_IDX]||trans.toDots===planetCache[SATURN_IDX])))
     updateSaturnMoons();
+  if(currentIdx===JUPITER_IDX||(trans.active&&(trans.fromDots===planetCache[JUPITER_IDX]||trans.toDots===planetCache[JUPITER_IDX])))
+    updateJupiterMoons();
 
   // Draw planets
   if(trans.active){
     trans.t=Math.min(1,trans.t+0.028);
     const e=easeInOut(trans.t);
     const fromOff=-trans.dir*e*W,toOff=trans.dir*(1-e)*W;
-    drawPlanetSet(trans.fromDots,fromOff,trans.fromDots===planetCache[EARTH_IDX],trans.fromDots===planetCache[SATURN_IDX]);
-    drawPlanetSet(trans.toDots,toOff,trans.toDots===planetCache[EARTH_IDX],trans.toDots===planetCache[SATURN_IDX]);
+    const fE=trans.fromDots===planetCache[EARTH_IDX],fS=trans.fromDots===planetCache[SATURN_IDX],fJ=trans.fromDots===planetCache[JUPITER_IDX];
+    const tE=trans.toDots===planetCache[EARTH_IDX],tS=trans.toDots===planetCache[SATURN_IDX],tJ=trans.toDots===planetCache[JUPITER_IDX];
+    drawPlanetSet(trans.fromDots,fromOff,fE,fS,fJ);
+    drawPlanetSet(trans.toDots,toOff,tE,tS,tJ);
     if(trans.t>=1){currentDots=trans.toDots;currentIdx=trans.toIdx;trans.active=false;}
   }else{
-    drawPlanetSet(currentDots,0,currentIdx===EARTH_IDX,currentIdx===SATURN_IDX);
+    drawPlanetSet(currentDots,0,currentIdx===EARTH_IDX,currentIdx===SATURN_IDX,currentIdx===JUPITER_IDX);
   }
 
   // Explosion flash
